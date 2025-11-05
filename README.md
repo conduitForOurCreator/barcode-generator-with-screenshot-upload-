@@ -89,3 +89,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 Leon Zeng - [@leonzeng2024](https://x.com/leonzeng2024)
 
 Project Link: [https://github.com/LeonZeng919/barcode-generator](https://github.com/LeonZeng919/barcode-generator)
+
+## Recommended AI Tools
+
+- [AIImageEdit.ai](https://aiimageedit.ai) - World's best AI Image Editor
