@@ -3,7 +3,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { Copy, Printer, Sliders, Lock } from 'lucide-react'
+import { Copy, Lock, Printer } from 'lucide-react'
 import { useBarcodeContext } from './BarcodeContext'
 
 import { useTranslations } from 'next-intl'
@@ -41,7 +41,7 @@ const LayoutSelector: React.FC<{
 
 export const InputComponent: React.FC = () => {
   const t = useTranslations('Barcode')
-  const { input, setInput } = useBarcodeContext()
+  const { input, setInput, showText } = useBarcodeContext()
   return (
     <div className="form-control">
       <label htmlFor="input" className="label">
@@ -65,58 +65,31 @@ export const InputComponent: React.FC = () => {
         id="input"
         value={input}
         onChange={(e) => setInput(e.target.value)}
-        className="h-28 bg-white"
-        placeholder="Enter values here, one per line"
+        className="h-28 bg-white font-mono text-sm"
+        placeholder={t('input.placeholder')}
+        onKeyDown={(e) => {
+          if (e.key === 'Tab') {
+            e.preventDefault()
+            const el = e.currentTarget
+            const start = el.selectionStart ?? 0
+            const end = el.selectionEnd ?? 0
+            const newValue = input.slice(0, start) + '\t' + input.slice(end)
+            setInput(newValue)
+            // Restore cursor position after React re-renders
+            requestAnimationFrame(() => {
+              el.selectionStart = start + 1
+              el.selectionEnd = start + 1
+            })
+          }
+        }}
       />
+      {showText && (
+        <p className="mt-1 text-xs text-gray-500">{t('input.caption-hint')}</p>
+      )}
     </div>
   )
 }
 
-export const OutputComponent: React.FC = () => {
-  const { output } = useBarcodeContext()
-  const outputRef = React.useRef<HTMLDivElement>(null)
-  const t = useTranslations('Barcode')
-  const [layout, setLayout] = React.useState('3x4')
-
-  // Create a numbered output
-  const numberedOutput = output
-    .map((svg, index) => {
-      const numberSpan =
-        output.length > 1
-          ? `<span class="barcode-number mr-2">${index + 1}.</span>`
-          : ''
-
-      return `<div class="barcode-item flex items-center mb-2">
-      ${numberSpan}
-      <div class="barcode-svg">${svg}</div>
-    </div>`
-    })
-    .join('')
-
-  return (
-    <div className="form-control flex flex-col">
-      <label htmlFor="output" className="label">
-        <div className="flex justify-between">
-          <span className="label-text text-lg font-semibold">
-            {t('output.title')}
-          </span>
-          <span className="label-text-alt flex items-center justify-between gap-4">
-            <ShareButton size="icon" variant="ghost" />
-            <PrintButton output={output} layout={layout} />
-            <LayoutSelector onLayoutChange={setLayout} />
-            <ScrollControls outputRef={outputRef} />
-          </span>
-        </div>
-      </label>
-      <div
-        ref={outputRef}
-        id="output"
-        className="flex aspect-square max-h-[480px] flex-col items-center overflow-auto rounded-md border bg-blue-100 bg-opacity-30 p-3 text-sm shadow-sm"
-        dangerouslySetInnerHTML={{ __html: numberedOutput }}
-      />
-    </div>
-  )
-}
 interface PrintButtonProps {
   output: string[]
   layout: string
@@ -124,7 +97,7 @@ interface PrintButtonProps {
 
 export const PrintButton: React.FC<PrintButtonProps> = ({ output, layout }) => {
   const handlePrint = () => {
-    const [cols, rows] = layout.split('x').map(Number)
+    const [cols] = layout.split('x').map(Number)
     const printContent = `
       <html>
         <head>
@@ -173,6 +146,52 @@ export const PrintButton: React.FC<PrintButtonProps> = ({ output, layout }) => {
     <Button size="icon" variant="ghost" onClick={handlePrint}>
       <Printer className="h-5 w-5" />
     </Button>
+  )
+}
+
+export const OutputComponent: React.FC = () => {
+  const { output } = useBarcodeContext()
+  const outputRef = React.useRef<HTMLDivElement>(null)
+  const t = useTranslations('Barcode')
+  const [layout, setLayout] = React.useState('3x4')
+
+  // Create a numbered output
+  const numberedOutput = output
+    .map((svg, index) => {
+      const numberSpan =
+        output.length > 1
+          ? `<span class="barcode-number mr-2">${index + 1}.</span>`
+          : ''
+
+      return `<div class="barcode-item flex items-center mb-2">
+      ${numberSpan}
+      <div class="barcode-svg">${svg}</div>
+    </div>`
+    })
+    .join('')
+
+  return (
+    <div className="form-control flex flex-col">
+      <label htmlFor="output" className="label">
+        <div className="flex justify-between">
+          <span className="label-text text-lg font-semibold">
+            {t('output.title')}
+          </span>
+          <span className="label-text-alt flex items-center justify-between gap-4">
+            <ShareButton size="icon" variant="ghost" />
+            <PrintButton output={output} layout={layout} />
+            <LayoutSelector onLayoutChange={setLayout} />
+            <ScrollControls outputRef={outputRef} />
+          </span>
+        </div>
+      </label>
+      <div
+        ref={outputRef}
+        id="output"
+        className="flex aspect-square max-h-[480px] flex-col items-center overflow-auto rounded-md border bg-blue-100 bg-opacity-30 p-3 text-sm shadow-sm"
+        dangerouslySetInnerHTML={{ __html: numberedOutput }}
+      />
+    </div>
   )
 }
 

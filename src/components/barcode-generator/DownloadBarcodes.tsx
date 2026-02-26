@@ -14,6 +14,7 @@ import FileSaver from 'file-saver'
 import { Download } from 'lucide-react'
 import { ImageFormat } from '@/types/image'
 import { checkQRCode, jsBarcodeSupportedFormats } from '@/config/barcode-types'
+import { parseLine } from '@/lib/parseLine'
 const bwipjs = require('bwip-js') as any
 
 export const DownloadBarcodes: React.FC = () => {
@@ -29,14 +30,18 @@ export const DownloadBarcodes: React.FC = () => {
   } = useBarcodeContext()
 
   const generateBarcode = useCallback(
-    (value: string): Promise<Blob | string> => {
-      return new Promise((resolve, reject) => {
+    (parsed: {
+      barcodeValue: string
+      displayText: string | undefined
+    }): Promise<Blob | string> =>
+      new Promise((resolve, reject) => {
+        const { barcodeValue: value, displayText } = parsed
         const scaleFactor = 1
 
         try {
           if (jsBarcodeSupportedFormats.includes(codeFormat.toUpperCase())) {
             // JsBarcode 配置
-            const jsBarcodeConfig = {
+            const jsBarcodeConfig: Record<string, unknown> = {
               format: codeFormat.toUpperCase(),
               width: 2,
               height: barcodeHeight,
@@ -49,6 +54,11 @@ export const DownloadBarcodes: React.FC = () => {
               lineColor: '#000000',
               textAlign: 'center',
               textPosition: 'bottom',
+            }
+
+            // Override display text when a custom caption is provided
+            if (showText && displayText !== undefined) {
+              jsBarcodeConfig.text = displayText
             }
 
             if (imageFormat === 'svg') {
@@ -119,7 +129,7 @@ export const DownloadBarcodes: React.FC = () => {
             const fontSize = 15 // 固定字体大小为15px
             const textMargin = 2 // 文本与条码之间的间距
 
-            const bwipConfig = {
+            const bwipConfig: Record<string, unknown> = {
               bcid: codeFormat.toLowerCase(),
               text: value,
               scale: scale,
@@ -133,6 +143,11 @@ export const DownloadBarcodes: React.FC = () => {
                   : marginInMM,
               backgroundcolor: 'ffffff',
               barcolor: '000000',
+            }
+
+            // Override display text for bwip-js (alttext)
+            if (showText && displayText !== undefined) {
+              bwipConfig.alttext = displayText
             }
 
             try {
@@ -159,7 +174,9 @@ export const DownloadBarcodes: React.FC = () => {
                   }
 
                   ctx.font = `${fontSize}px Arial`
-                  const textWidth = ctx.measureText(value).width
+                  const labelText =
+                    displayText !== undefined ? displayText : value
+                  const textWidth = ctx.measureText(labelText).width
 
                   // 计算缩放比例
                   const availableWidth = barcodeLength - marginInMM * 2
@@ -185,7 +202,7 @@ export const DownloadBarcodes: React.FC = () => {
                   )
                   text.setAttribute('fill', '#000000')
 
-                  text.textContent = value
+                  text.textContent = labelText
                   svg.appendChild(text)
 
                   svg.setAttribute(
@@ -207,8 +224,10 @@ export const DownloadBarcodes: React.FC = () => {
                   }
 
                   // 测量文本宽度
+                  const labelText =
+                    displayText !== undefined ? displayText : value
                   tempCtx.font = `${fontSize}px Arial`
-                  const textWidth = tempCtx.measureText(value).width
+                  const textWidth = tempCtx.measureText(labelText).width
                   const requiredWidth = textWidth + barcodeMargin * 2 // 文本需要的宽度（包含边距）
 
                   // 计算缩放比例 - 如果文本宽度大于原始宽度，需要放大整体尺寸
@@ -239,9 +258,8 @@ export const DownloadBarcodes: React.FC = () => {
                   ctx.fillStyle = '#000000'
                   ctx.font = `${fontSize}px Arial`
                   ctx.textAlign = 'center'
-                  // ctx.textBaseline = 'top'
                   ctx.fillText(
-                    value,
+                    labelText,
                     finalWidth / 2,
                     finalHeight - fontSize - textMargin,
                   )
@@ -287,8 +305,7 @@ export const DownloadBarcodes: React.FC = () => {
           console.error('Error generating barcode:', error)
           reject(new Error(`Failed to generate barcode: ${error}`))
         }
-      })
-    },
+      }),
     [
       barcodeLength,
       barcodeHeight,
@@ -300,10 +317,11 @@ export const DownloadBarcodes: React.FC = () => {
   )
 
   const downloadBarcodes = useCallback(async () => {
-    const values = input.split('\n').filter((value) => value.trim() !== '')
+    const lines = input.split('\n').filter((line) => line.trim() !== '')
+    const parsed = lines.map(parseLine)
 
-    if (values.length === 1) {
-      const barcodeData = await generateBarcode(values[0])
+    if (parsed.length === 1) {
+      const barcodeData = await generateBarcode(parsed[0])
       if (imageFormat === 'svg') {
         const blob = new Blob([barcodeData as string], {
           type: 'image/svg+xml;charset=utf-8',
@@ -318,9 +336,8 @@ export const DownloadBarcodes: React.FC = () => {
     } else {
       const zip = new JSZip()
 
-      for (let i = 0; i < values.length; i++) {
-        const value = values[i]
-        const barcodeData = await generateBarcode(value)
+      for (let i = 0; i < parsed.length; i++) {
+        const barcodeData = await generateBarcode(parsed[i])
         if (imageFormat === 'svg') {
           zip.file(
             `barcode-${codeFormat}_${i + 1}.${imageFormat}`,

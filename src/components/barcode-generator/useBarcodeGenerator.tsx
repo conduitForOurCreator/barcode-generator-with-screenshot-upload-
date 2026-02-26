@@ -3,6 +3,7 @@ import JsBarcode from 'jsbarcode'
 const bwipjs = require('bwip-js') as any
 import { useBarcodeContext } from './BarcodeContext'
 import { checkQRCode, jsBarcodeSupportedFormats } from '@/config/barcode-types'
+import { parseLine } from '@/lib/parseLine'
 
 export const useBarcodeGenerator = () => {
   const {
@@ -16,13 +17,15 @@ export const useBarcodeGenerator = () => {
   } = useBarcodeContext()
 
   const generateBarcodes = useCallback(() => {
-    const values = input.split('\n').filter((value) => value.trim() !== '')
+    const lines = input.split('\n').filter((line) => line.trim() !== '')
 
     try {
-      const barcodes = values.map((value) => {
+      const barcodes = lines.map((line) => {
+        const { barcodeValue: value, displayText } = parseLine(line)
+
         if (jsBarcodeSupportedFormats.includes(codeFormat.toUpperCase())) {
           // JsBarcode 配置
-          const jsBarcodeConfig = {
+          const jsBarcodeConfig: Record<string, unknown> = {
             format: codeFormat.toUpperCase(),
             width: 2,
             height: barcodeHeight,
@@ -35,6 +38,12 @@ export const useBarcodeGenerator = () => {
             textAlign: 'center',
             textPosition: 'bottom',
             textMargin: 2,
+          }
+
+          // When showText is on and user provided a custom caption, override
+          // the rendered text (JsBarcode accepts a `text` option for this).
+          if (showText && displayText !== undefined) {
+            jsBarcodeConfig.text = displayText
           }
 
           const svg = document.createElementNS(
@@ -65,7 +74,7 @@ export const useBarcodeGenerator = () => {
           const fontSize = 15 // 假设字体大小为15px
           const textMargin = 2 // 假设文本与条码之间的间距为2px
 
-          const bwipConfig = {
+          const bwipConfig: Record<string, unknown> = {
             bcid: codeFormat.toLowerCase(),
             text: value,
             scale: scale,
@@ -79,6 +88,11 @@ export const useBarcodeGenerator = () => {
                 : marginInMM,
             backgroundcolor: 'ffffff',
             barcolor: '000000',
+          }
+
+          // bwip-js: use `alttext` to override the human-readable text below bars
+          if (showText && displayText !== undefined) {
+            bwipConfig.alttext = displayText
           }
 
           let svgString
@@ -110,8 +124,10 @@ export const useBarcodeGenerator = () => {
               return `<div class="barcode-item">${svg.outerHTML}</div>`
             }
 
+            // Measure the caption text (or fall back to the barcode value)
+            const labelText = displayText !== undefined ? displayText : value
             ctx.font = `${fontSize}px Arial`
-            const textWidth = ctx.measureText(value).width
+            const textWidth = ctx.measureText(labelText).width
 
             // 计算缩放比例
             const availableWidth = barcodeLength - marginInMM * 2
@@ -137,7 +153,7 @@ export const useBarcodeGenerator = () => {
             )
             text.setAttribute('fill', '#000000')
 
-            text.textContent = value
+            text.textContent = labelText
             svg.appendChild(text)
 
             svg.setAttribute(
