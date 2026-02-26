@@ -93,3 +93,4 @@ Project Link: [https://github.com/LeonZeng919/barcode-generator](https://github.
 ## Recommended AI Tools
 
 - [AIImageEdit.ai](https://aiimageedit.ai) - World's best AI Image Editor
+- [AI Face Swaps](https://aifaceswaps.app) - Free online AI face swap tool
