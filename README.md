@@ -94,3 +94,4 @@ Project Link: [https://github.com/LeonZeng919/barcode-generator](https://github.
 
 - [AIImageEdit.ai](https://aiimageedit.ai) - World's best AI Image Editor
 - [AI Face Swaps](https://aifaceswaps.app) - Free online AI face swap tool
+- [Spin the Wheel](https://spin-the-wheel.ai/) - Free online spin the wheel random picker with AI auto-generated wheels
