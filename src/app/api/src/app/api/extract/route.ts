@@ -15,6 +15,16 @@ For TYPE C set description and location to empty string. Extract every SKU visib
 
 export async function POST(req: NextRequest) {
   try {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+
+    if (!apiKey) {
+      console.error("ANTHROPIC_API_KEY is not set");
+      return NextResponse.json(
+        { error: "API key not configured. Add ANTHROPIC_API_KEY to Vercel environment variables." },
+        { status: 500 }
+      );
+    }
+
     const { imageData, mediaType } = await req.json();
 
     if (!imageData || !mediaType) {
@@ -25,11 +35,11 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY!,
+        "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         max_tokens: 1000,
         messages: [
           {
@@ -49,20 +59,33 @@ export async function POST(req: NextRequest) {
     const data = await response.json();
 
     if (!response.ok) {
-      return NextResponse.json({ error: data?.error?.message || "Anthropic API error" }, { status: 500 });
+      const errMsg = data?.error?.message || JSON.stringify(data);
+      console.error("Anthropic API error:", response.status, errMsg);
+      return NextResponse.json({ error: errMsg }, { status: 500 });
     }
 
-    const text = data.content
-      .filter((b: { type: string }) => b.type === "text")
-      .map((b: { text: string }) => b.text)
+    const text = (data.content as { type: string; text?: string }[])
+      .filter((b) => b.type === "text")
+      .map((b) => b.text || "")
       .join("");
 
     const clean = text.replace(/```json|```/g, "").trim();
-    const items = JSON.parse(clean);
+
+    let items;
+    try {
+      items = JSON.parse(clean);
+    } catch {
+      console.error("JSON parse failed. Raw response:", text);
+      return NextResponse.json({ error: "Could not parse model response as JSON" }, { status: 500 });
+    }
+
+    if (!Array.isArray(items)) {
+      return NextResponse.json({ error: "Model did not return an array" }, { status: 500 });
+    }
 
     return NextResponse.json({ items });
   } catch (err) {
-    console.error("Extract route error:", err);
-    return NextResponse.json({ error: "Failed to process image" }, { status: 500 });
+    console.error("Extract route exception:", err);
+    return NextResponse.json({ error: "Unexpected server error" }, { status: 500 });
   }
 }
