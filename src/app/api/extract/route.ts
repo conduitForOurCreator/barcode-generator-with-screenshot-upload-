@@ -1,63 +1,68 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
-import Tesseract from "tesseract.js";
+import { createWorker } from "tesseract.js";
 
-// ── SKU pattern: 4-3-3 digits e.g. 0000-417-725 or 1008-665-104 ──
+// SKU pattern: 3-4 digits, dash, 3 digits, dash, 3 digits
+// e.g. 0000-417-725 or 1008-665-104
 const SKU_RE = /\b(\d{3,4}-\d{3}-\d{3})\b/g;
 
-// ── Location patterns: e.g. "12-010-101" or "AISLE 10 BAY 009" or "33-010" ──
-const LOC_RE = /\b(\d{1,2}-\d{3}(?:-\d{3})?|\d{2}-\d{3}|AISLE\s+\d+\s+BAY\s+\d+)/gi;
+// Location patterns: e.g. 12-010-101 or AISLE 10 BAY 009 or 33-010
+const LOC_RE = /\b(\d{1,2}-\d{3}(?:-\d{3})?|AISLE\s+\d+\s*(?:BAY\s*)?\d*)/gi;
 
-// ── Price line — helps us find the description line nearby ──
 const PRICE_RE = /\$[\d.]+/;
 
-function parseOcrText(raw: string): Array<{ sku: string; description: string; location: string }> {
+interface ExtractedItem {
+  sku: string;
+  description: string;
+  location: string;
+}
+
+function parseOcrText(raw: string): ExtractedItem[] {
   const lines = raw
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const results: Array<{ sku: string; description: string; location: string }> = [];
+  const results: ExtractedItem[] = [];
   const usedSkus = new Set<string>();
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const skuMatches = [...line.matchAll(SKU_RE)];
+    const skuMatches = Array.from(line.matchAll(new RegExp(SKU_RE.source, "g")));
 
     for (const match of skuMatches) {
       const sku = match[1];
       if (usedSkus.has(sku)) continue;
       usedSkus.add(sku);
 
-      // ── Look for description: line before or after SKU that is
-      //    ALL CAPS text and not a price / SKU / location ──
+      // Search nearby lines for description (all-caps text, not a price/sku/location)
       let description = "";
-      const window = lines.slice(Math.max(0, i - 4), Math.min(lines.length, i + 5));
-      for (const wl of window) {
-        if (SKU_RE.test(wl)) { SKU_RE.lastIndex = 0; continue; }
-        SKU_RE.lastIndex = 0;
+      const windowStart = Math.max(0, i - 4);
+      const windowEnd = Math.min(lines.length, i + 5);
+      const windowLines = lines.slice(windowStart, windowEnd);
+
+      for (const wl of windowLines) {
+        if (new RegExp(SKU_RE.source).test(wl)) continue;
         if (PRICE_RE.test(wl)) continue;
-        if (LOC_RE.test(wl)) { LOC_RE.lastIndex = 0; continue; }
-        LOC_RE.lastIndex = 0;
-        // Must be mostly uppercase letters and spaces — likely a product name
-        const upper = wl.replace(/[^A-Za-z ]/g, "");
-        if (upper.length > 3 && upper === upper.toUpperCase()) {
+        if (new RegExp(LOC_RE.source, "i").test(wl)) continue;
+        const lettersOnly = wl.replace(/[^A-Za-z ]/g, "");
+        if (lettersOnly.length > 3 && lettersOnly === lettersOnly.toUpperCase()) {
           description = wl.replace(/[^\w\s\-\/%.'"]/g, "").trim();
           break;
         }
       }
 
-      // ── Look for location in surrounding lines ──
+      // Search nearby lines for location
       let location = "";
-      const locWindow = lines.slice(Math.max(0, i - 3), Math.min(lines.length, i + 4));
-      for (const wl of locWindow) {
-        const lm = wl.match(LOC_RE);
-        if (lm) {
-          // Exclude the SKU itself being matched as a location
-          const candidate = lm[0];
-          if (candidate !== sku) {
-            location = candidate;
-            break;
-          }
+      const locWindowLines = lines.slice(
+        Math.max(0, i - 3),
+        Math.min(lines.length, i + 4)
+      );
+      for (const wl of locWindowLines) {
+        const lm = wl.match(new RegExp(LOC_RE.source, "i"));
+        if (lm && lm[0] !== sku) {
+          location = lm[0];
+          break;
         }
       }
 
@@ -68,26 +73,22 @@ function parseOcrText(raw: string): Array<{ sku: string; description: string; lo
   return results;
 }
 
-async function runTesseract(
-  imageBuffer: Buffer,
-  mediaType: string
-): Promise<Array<{ sku: string; description: string; location: string }>> {
-  // Convert buffer to base64 data URL for Tesseract
-  const dataUrl = `data:${mediaType};base64,${imageBuffer.toString("base64")}`;
-
-  const { data } = await Tesseract.recognize(dataUrl, "eng", {
-    // Optimise for sparse text on a clean background
-    tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
-  } as Tesseract.RecognizeOptions);
-
-  const items = parseOcrText(data.text);
-  return items;
+async function runTesseract(imageBuffer: Buffer): Promise<ExtractedItem[]> {
+  const worker = await createWorker("eng");
+  try {
+    const dataUrl = `data:image/jpeg;base64,${imageBuffer.toString("base64")}`;
+    const { data } = await worker.recognize(dataUrl);
+    console.log("Tesseract raw text:", data.text.slice(0, 200));
+    return parseOcrText(data.text);
+  } finally {
+    await worker.terminate();
+  }
 }
 
 async function runAnthropic(
   imageData: string,
   mediaType: string
-): Promise<Array<{ sku: string; description: string; location: string }>> {
+): Promise<ExtractedItem[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("No ANTHROPIC_API_KEY set");
 
@@ -124,15 +125,14 @@ If it is a plain list of SKU numbers, set description and location to empty stri
   const d = await r.json();
   if (!r.ok) throw new Error(d?.error?.message || JSON.stringify(d));
 
-  const text = (d.content as { type: string; text?: string }[])
-    .filter((b) => b.type === "text")
-    .map((b) => b.text || "")
+  const text = (d.content as any[])
+    .filter((b: any) => b.type === "text")
+    .map((b: any) => b.text || "")
     .join("");
 
   return JSON.parse(text.replace(/```json|```/g, "").trim());
 }
 
-// ── Main handler ──────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
     let body: { imageData?: string; mediaType?: string };
@@ -149,29 +149,29 @@ export async function POST(req: NextRequest) {
 
     const imageBuffer = Buffer.from(imageData, "base64");
 
-    // ── 1. Try Tesseract first ────────────────────────────────────
-    let items: Array<{ sku: string; description: string; location: string }> = [];
+    // 1. Try Tesseract first (free, no API cost)
+    let items: ExtractedItem[] = [];
     let usedFallback = false;
 
     try {
       console.log("Attempting Tesseract OCR...");
-      items = await runTesseract(imageBuffer, mediaType);
+      items = await runTesseract(imageBuffer);
       console.log(`Tesseract found ${items.length} items`);
     } catch (err) {
       console.warn("Tesseract failed:", err);
     }
 
-    // ── 2. Fall back to Anthropic if Tesseract found nothing ──────
+    // 2. Fall back to Anthropic only if Tesseract found nothing
     if (items.length === 0) {
-      console.log("No SKUs from Tesseract — falling back to Anthropic API");
+      console.log("Tesseract found 0 items — falling back to Anthropic API");
       try {
         items = await runAnthropic(imageData, mediaType);
         usedFallback = true;
         console.log(`Anthropic fallback found ${items.length} items`);
       } catch (err) {
-        console.error("Anthropic fallback also failed:", err);
+        console.error("Anthropic fallback failed:", err);
         return NextResponse.json(
-          { error: "Could not extract data from image. OCR and AI fallback both failed." },
+          { error: "Could not extract data — both OCR and AI fallback failed." },
           { status: 500 }
         );
       }
@@ -179,7 +179,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ items, usedFallback });
   } catch (err) {
-    console.error("Outer error in /api/extract:", err);
+    console.error("Unexpected error in /api/extract:", err);
     return NextResponse.json({ error: "Unexpected server error" }, { status: 500 });
   }
 }
